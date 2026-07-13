@@ -1,0 +1,8 @@
+# The upstream clone is fetched fresh at build time, never committed.
+/go-ethereum/
+/spageth-clone/
+
+# Build output.
+/build/
+*.rej
+*.orig

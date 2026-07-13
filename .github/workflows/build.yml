@@ -1,0 +1,32 @@
+name: build
+
+# Validates that the patch + overlay build cleanly on every push and PR.
+on:
+  push:
+    branches: [master]
+  pull_request: {}
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.5"
+
+      - name: Build spageth
+        run: scripts/spageth-build.sh --ref master
+
+      - name: Run overlay tests
+        run: |
+          cd go-ethereum
+          go test ./eth/xatuobserver/...
+
+      - name: Smoke test binary
+        run: |
+          ./go-ethereum/build/bin/geth version
+          ./go-ethereum/build/bin/geth --help | grep -q -- '--xatu.config'
+          ./go-ethereum/build/bin/geth --help | grep -q -- '--churn.drop.min'

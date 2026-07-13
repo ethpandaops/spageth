@@ -1,0 +1,389 @@
+diff --git a/cmd/geth/main.go b/cmd/geth/main.go
+index 14e3a54..d4f6181 100644
+--- a/cmd/geth/main.go
++++ b/cmd/geth/main.go
+@@ -124,6 +124,11 @@ var (
+ 		utils.DeveloperGasLimitFlag,
+ 		utils.DeveloperPeriodFlag,
+ 		utils.VMEnableDebugFlag,
++		utils.XatuConfigFlag,
++		utils.ChurnDialHistoryFlag,
++		utils.ChurnDropIntervalMinFlag,
++		utils.ChurnDropIntervalMaxFlag,
++		utils.ChurnDropGraceFlag,
+ 		utils.VMTraceFlag,
+ 		utils.VMTraceJsonConfigFlag,
+ 		utils.VMWitnessStatsFlag,
+diff --git a/cmd/utils/flags.go b/cmd/utils/flags.go
+index fd9893f..c62d9ca 100644
+--- a/cmd/utils/flags.go
++++ b/cmd/utils/flags.go
+@@ -615,6 +615,31 @@ var (
+ 		Usage:    "Record information useful for VM and contract debugging",
+ 		Category: flags.VMCategory,
+ 	}
++	XatuConfigFlag = &cli.StringFlag{
++		Name:     "xatu.config",
++		Usage:    "Path to a xatu observer config file; enables exporting node record events for every eth handshake",
++		Category: flags.EthCategory,
++	}
++	ChurnDialHistoryFlag = &cli.DurationFlag{
++		Name:     "churn.dialhistory",
++		Usage:    "How long a dialed node is excluded from being redialed (0 = default 35s)",
++		Category: flags.NetworkingCategory,
++	}
++	ChurnDropIntervalMinFlag = &cli.DurationFlag{
++		Name:     "churn.drop.min",
++		Usage:    "Minimum interval between capacity-based peer drop events (0 = default 3m)",
++		Category: flags.NetworkingCategory,
++	}
++	ChurnDropIntervalMaxFlag = &cli.DurationFlag{
++		Name:     "churn.drop.max",
++		Usage:    "Maximum interval between capacity-based peer drop events (0 = default 7m)",
++		Category: flags.NetworkingCategory,
++	}
++	ChurnDropGraceFlag = &cli.DurationFlag{
++		Name:     "churn.drop.grace",
++		Usage:    "How long a newly connected peer is protected from capacity-based dropping (0 = default 10m)",
++		Category: flags.NetworkingCategory,
++	}
+ 	VMTraceFlag = &cli.StringFlag{
+ 		Name:     "vmtrace",
+ 		Usage:    "Name of tracer which should record internal VM operations (costly)",
+@@ -1479,6 +1504,9 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config) {
+ 	if ctx.IsSet(MaxPendingPeersFlag.Name) {
+ 		cfg.MaxPendingPeers = ctx.Int(MaxPendingPeersFlag.Name)
+ 	}
++	if ctx.IsSet(ChurnDialHistoryFlag.Name) {
++		cfg.DialHistoryExpiration = ctx.Duration(ChurnDialHistoryFlag.Name)
++	}
+ 	if ctx.IsSet(NoDiscoverFlag.Name) {
+ 		cfg.NoDiscovery = ctx.Bool(NoDiscoverFlag.Name)
+ 	}
+@@ -2070,6 +2098,19 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
+ 		}
+ 	}()
+ 
++	if ctx.IsSet(XatuConfigFlag.Name) {
++		cfg.XatuConfig = ctx.String(XatuConfigFlag.Name)
++	}
++	if ctx.IsSet(ChurnDropIntervalMinFlag.Name) {
++		cfg.PeerDropIntervalMin = ctx.Duration(ChurnDropIntervalMinFlag.Name)
++	}
++	if ctx.IsSet(ChurnDropIntervalMaxFlag.Name) {
++		cfg.PeerDropIntervalMax = ctx.Duration(ChurnDropIntervalMaxFlag.Name)
++	}
++	if ctx.IsSet(ChurnDropGraceFlag.Name) {
++		cfg.PeerDropGrace = ctx.Duration(ChurnDropGraceFlag.Name)
++	}
++
+ 	// VM tracing config.
+ 	if ctx.IsSet(VMTraceFlag.Name) {
+ 		if name := ctx.String(VMTraceFlag.Name); name != "" {
+diff --git a/eth/backend.go b/eth/backend.go
+index 72bda31..b9ee722 100644
+--- a/eth/backend.go
++++ b/eth/backend.go
+@@ -362,7 +362,12 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
+ 		return nil, err
+ 	}
+ 
+-	eth.dropper = newDropper(eth.p2pServer.MaxDialedConns(), eth.p2pServer.MaxInboundConns())
++	eth.dropper = newDropper(eth.p2pServer.MaxDialedConns(), eth.p2pServer.MaxInboundConns(),
++		config.PeerDropIntervalMin, config.PeerDropIntervalMax, config.PeerDropGrace)
++
++	if err := eth.initXatuObserver(stack); err != nil {
++		return nil, err
++	}
+ 
+ 	eth.miner = miner.New(eth, config.Miner, eth.engine)
+ 	eth.miner.SetExtra(makeExtraData(config.Miner.ExtraData))
+diff --git a/eth/dropper.go b/eth/dropper.go
+index 36c970e..9ffbe4c 100644
+--- a/eth/dropper.go
++++ b/eth/dropper.go
+@@ -103,6 +103,10 @@ type dropper struct {
+ 	syncingFunc     getSyncingFunc
+ 	peerStatsFunc   getPeerStatsFunc // optional: inclusion stats for protection
+ 
++	dropIntervalMin time.Duration // minimum time between peer drop events
++	dropIntervalMax time.Duration // maximum time between peer drop events
++	dropGrace       time.Duration // peers younger than this are never dropped
++
+ 	// peerDropTimer introduces churn if we are close to limit capacity.
+ 	// We handle Dialed and Inbound connections separately
+ 	peerDropTimer *time.Timer
+@@ -118,15 +122,29 @@ type getPeersFunc func() []*p2p.Peer
+ // Returns true while syncing, false when synced.
+ type getSyncingFunc func() bool
+ 
+-func newDropper(maxDialPeers, maxInboundPeers int) *dropper {
++// newDropper creates a peer dropper. Zero values for the interval and grace
++// durations fall back to the package defaults.
++func newDropper(maxDialPeers, maxInboundPeers int, dropIntervalMin, dropIntervalMax, dropGrace time.Duration) *dropper {
++	if dropIntervalMin == 0 {
++		dropIntervalMin = peerDropIntervalMin
++	}
++	if dropIntervalMax == 0 {
++		dropIntervalMax = peerDropIntervalMax
++	}
++	if dropGrace == 0 {
++		dropGrace = doNotDropBefore
++	}
+ 	cm := &dropper{
+ 		maxDialPeers:    maxDialPeers,
+ 		maxInboundPeers: maxInboundPeers,
+-		peerDropTimer:   time.NewTimer(randomDuration(peerDropIntervalMin, peerDropIntervalMax)),
++		dropIntervalMin: dropIntervalMin,
++		dropIntervalMax: dropIntervalMax,
++		dropGrace:       dropGrace,
++		peerDropTimer:   time.NewTimer(randomDuration(dropIntervalMin, dropIntervalMax)),
+ 		shutdownCh:      make(chan struct{}),
+ 	}
+-	if peerDropIntervalMin > peerDropIntervalMax {
+-		panic("peerDropIntervalMin duration must be less than or equal to peerDropIntervalMax duration")
++	if dropIntervalMin > dropIntervalMax {
++		panic("peer drop interval min duration must be less than or equal to max duration")
+ 	}
+ 	return cm
+ }
+@@ -173,7 +191,7 @@ func (cm *dropper) dropRandomPeer() bool {
+ 
+ 	selectDoNotDrop := func(p *p2p.Peer) bool {
+ 		return p.Trusted() || p.StaticDialed() ||
+-			p.Lifetime() < mclock.AbsTime(doNotDropBefore) ||
++			p.Lifetime() < mclock.AbsTime(cm.dropGrace) ||
+ 			(p.DynDialed() && cm.maxDialPeers-numDialed > peerDropThreshold) ||
+ 			(p.Inbound() && cm.maxInboundPeers-numInbound > peerDropThreshold) ||
+ 			protected[p]
+@@ -278,7 +296,7 @@ func (cm *dropper) loop() {
+ 			if !cm.syncingFunc() {
+ 				cm.dropRandomPeer()
+ 			}
+-			cm.peerDropTimer.Reset(randomDuration(peerDropIntervalMin, peerDropIntervalMax))
++			cm.peerDropTimer.Reset(randomDuration(cm.dropIntervalMin, cm.dropIntervalMax))
+ 		case <-cm.shutdownCh:
+ 			return
+ 		}
+diff --git a/eth/ethconfig/config.go b/eth/ethconfig/config.go
+index 378bb64..37681b3 100644
+--- a/eth/ethconfig/config.go
++++ b/eth/ethconfig/config.go
+@@ -189,6 +189,21 @@ type Config struct {
+ 	// It is not safe to enable on public networks yet.
+ 	SnapV2 bool
+ 
++	// XatuConfig is the path to a xatu observer configuration file. When set,
++	// every eth handshake (inbound and outbound, successful or rejected) is
++	// exported as a node record event to the configured xatu server.
++	XatuConfig string
++
++	// PeerDropIntervalMin and PeerDropIntervalMax bound the random interval
++	// between peer drop events when a connection pool is at capacity. Lower
++	// values increase peer churn. Zero values default to 3 and 7 minutes.
++	PeerDropIntervalMin time.Duration
++	PeerDropIntervalMax time.Duration
++
++	// PeerDropGrace is how long a peer is protected from capacity-based
++	// dropping after it connects. Zero defaults to 10 minutes.
++	PeerDropGrace time.Duration
++
+ 	// Enables VM tracing
+ 	VMTrace           string
+ 	VMTraceJsonConfig string
+diff --git a/eth/handler.go b/eth/handler.go
+index 4a9573e..a81e08d 100644
+--- a/eth/handler.go
++++ b/eth/handler.go
+@@ -134,6 +134,10 @@ type handler struct {
+ 
+ 	requiredBlocks map[uint64]common.Hash
+ 
++	// peerObserver, when set, is invoked once per eth handshake attempt with
++	// the peer and the handshake result, before any capacity-based rejection.
++	peerObserver func(*eth.Peer, error)
++
+ 	// channels for fetcher, syncer, txsyncLoop
+ 	quitSync chan struct{}
+ 
+@@ -244,8 +248,14 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
+ 	// Execute the Ethereum handshake
+ 	if err := peer.Handshake(h.networkID, h.chain, h.blockRange.currentRange()); err != nil {
+ 		peer.Log().Debug("Ethereum handshake failed", "err", err)
++		if h.peerObserver != nil {
++			h.peerObserver(peer, err)
++		}
+ 		return err
+ 	}
++	if h.peerObserver != nil {
++		h.peerObserver(peer, nil)
++	}
+ 	reject := false // reserved peer slots
+ 	if h.downloader.ConfigSyncMode() == ethconfig.SnapSync {
+ 		// A peer is useful to the active state syncer only if it offers the snap
+diff --git a/eth/protocols/eth/handshake.go b/eth/protocols/eth/handshake.go
+index 359e4e3..77bb5f4 100644
+--- a/eth/protocols/eth/handshake.go
++++ b/eth/protocols/eth/handshake.go
+@@ -68,6 +68,8 @@ func (p *Peer) readStatus(networkID uint64, status *StatusPacket, genesis common
+ 	if err := p.readStatusMsg(status); err != nil {
+ 		return err
+ 	}
++	received := *status
++	p.statusPacket.Store(&received)
+ 	if status.NetworkID != networkID {
+ 		return fmt.Errorf("%w: %d (!= %d)", errNetworkIDMismatch, status.NetworkID, networkID)
+ 	}
+diff --git a/eth/protocols/eth/peer.go b/eth/protocols/eth/peer.go
+index 1e33fbe..46936dc 100644
+--- a/eth/protocols/eth/peer.go
++++ b/eth/protocols/eth/peer.go
+@@ -66,6 +66,11 @@ type Peer struct {
+ 	version   uint              // Protocol version negotiated
+ 	lastRange atomic.Pointer[BlockRangeUpdatePacket]
+ 
++	// statusPacket holds the raw Status message received from the remote peer,
++	// stored before validation so it is available even for peers rejected
++	// during the handshake (wrong network, wrong fork, etc).
++	statusPacket atomic.Pointer[StatusPacket]
++
+ 	txpool      TxPool             // Transaction pool used by the broadcasters for liveness checks
+ 	knownTxs    *knownCache        // Set of transaction hashes known to be known by this peer
+ 	txBroadcast chan []common.Hash // Channel used to queue transaction propagation requests
+@@ -131,6 +136,14 @@ func (p *Peer) Version() uint {
+ 	return p.version
+ }
+ 
++// Status returns the raw Status message received from the remote peer during
++// the eth handshake, or nil if none was received. Unlike the validated
++// handshake result, this is populated even when the handshake failed, so
++// callers can observe peers on other networks or forks.
++func (p *Peer) Status() *StatusPacket {
++	return p.statusPacket.Load()
++}
++
+ // BlockRange returns the latest announced block range.
+ // This will be nil for peers below protocol version eth/69.
+ func (p *Peer) BlockRange() *BlockRangeUpdatePacket {
+diff --git a/p2p/config.go b/p2p/config.go
+index 17607a1..46dad83 100644
+--- a/p2p/config.go
++++ b/p2p/config.go
+@@ -20,6 +20,7 @@ import (
+ 	"crypto/ecdsa"
+ 	"encoding"
+ 	"fmt"
++	"time"
+ 
+ 	"github.com/ethereum/go-ethereum/common/mclock"
+ 	"github.com/ethereum/go-ethereum/log"
+@@ -48,6 +49,12 @@ type Config struct {
+ 	// Setting DialRatio to zero defaults it to 3.
+ 	DialRatio int `toml:",omitempty"`
+ 
++	// DialHistoryExpiration controls how long a dialed node is excluded from
++	// being redialed. Longer values force dial slots to rotate through the
++	// discovered node set instead of revisiting recent peers. Setting it to
++	// zero defaults it to 35 seconds.
++	DialHistoryExpiration time.Duration `toml:"-"`
++
+ 	// NoDiscovery can be used to disable the peer discovery mechanism.
+ 	// Disabling is useful for protocol debugging (manual topology).
+ 	NoDiscovery bool
+diff --git a/p2p/dial.go b/p2p/dial.go
+index 0ffcd10..8b447bb 100644
+--- a/p2p/dial.go
++++ b/p2p/dial.go
+@@ -137,21 +137,25 @@ type dialScheduler struct {
+ type dialSetupFunc func(net.Conn, connFlag, *enode.Node) error
+ 
+ type dialConfig struct {
+-	self           enode.ID         // our own ID
+-	maxDialPeers   int              // maximum number of dialed peers
+-	maxActiveDials int              // maximum number of active dials
+-	netRestrict    *netutil.Netlist // IP netrestrict list, disabled if nil
+-	resolver       nodeResolver
+-	dialer         NodeDialer
+-	log            log.Logger
+-	clock          mclock.Clock
+-	rand           *mrand.Rand
++	self              enode.ID         // our own ID
++	maxDialPeers      int              // maximum number of dialed peers
++	maxActiveDials    int              // maximum number of active dials
++	historyExpiration time.Duration    // how long dialed nodes are excluded from redialing
++	netRestrict       *netutil.Netlist // IP netrestrict list, disabled if nil
++	resolver          nodeResolver
++	dialer            NodeDialer
++	log               log.Logger
++	clock             mclock.Clock
++	rand              *mrand.Rand
+ }
+ 
+ func (cfg dialConfig) withDefaults() dialConfig {
+ 	if cfg.maxActiveDials == 0 {
+ 		cfg.maxActiveDials = defaultMaxPendingPeers
+ 	}
++	if cfg.historyExpiration == 0 {
++		cfg.historyExpiration = dialHistoryExpiration
++	}
+ 	if cfg.log == nil {
+ 		cfg.log = log.Root()
+ 	}
+@@ -539,7 +543,7 @@ func (d *dialScheduler) startDial(task *dialTask) {
+ 	node := task.dest()
+ 	d.log.Trace("Starting p2p dial", "id", node.ID(), "endpoint", nodeEndpointForLog(node), "flag", task.flags)
+ 	hkey := string(node.ID().Bytes())
+-	d.history.add(hkey, d.clock.Now().Add(dialHistoryExpiration))
++	d.history.add(hkey, d.clock.Now().Add(d.historyExpiration))
+ 	d.dialing[node.ID()] = task
+ 	go func() {
+ 		task.run(d)
+diff --git a/p2p/peer.go b/p2p/peer.go
+index 5521889..d93c9ce 100644
+--- a/p2p/peer.go
++++ b/p2p/peer.go
+@@ -176,6 +176,14 @@ func (p *Peer) Caps() []Cap {
+ 	return p.rw.caps
+ }
+ 
++// RemoteListenPort returns the TCP listening port the remote peer advertised
++// in its devp2p Hello message, or zero if it advertised none. For inbound
++// peers this is the only source of the remote's listening port, since the
++// connection itself originates from an ephemeral port.
++func (p *Peer) RemoteListenPort() uint64 {
++	return p.rw.listenPort
++}
++
+ // RunningCap returns true if the peer is actively connected using any of the
+ // enumerated versions of a specific protocol, meaning that at least one of the
+ // versions is supported by both this node and the peer p.
+diff --git a/p2p/server.go b/p2p/server.go
+index 6d2323f..93abb89 100644
+--- a/p2p/server.go
++++ b/p2p/server.go
+@@ -141,6 +141,8 @@ type conn struct {
+ 	cont  chan error // The run loop uses cont to signal errors to SetupConn.
+ 	caps  []Cap      // valid after the protocol handshake
+ 	name  string     // valid after the protocol handshake
++
++	listenPort uint64 // TCP listening port advertised in the Hello message, if any
+ }
+ 
+ type transport interface {
+@@ -532,6 +534,8 @@ func (srv *Server) setupDialScheduler() {
+ 		netRestrict:    srv.NetRestrict,
+ 		dialer:         srv.Dialer,
+ 		clock:          srv.clock,
++
++		historyExpiration: srv.DialHistoryExpiration,
+ 	}
+ 	if srv.discv4 != nil {
+ 		config.resolver = srv.discv4
+@@ -944,6 +948,7 @@ func (srv *Server) setupConn(c *conn, dialDest *enode.Node) error {
+ 		return DiscUnexpectedIdentity
+ 	}
+ 	c.caps, c.name = phs.Caps, phs.Name
++	c.listenPort = phs.ListenPort
+ 	err = srv.checkpoint(c, srv.checkpointAddPeer)
+ 	if err != nil {
+ 		clog.Trace("Rejected peer", "err", err)
