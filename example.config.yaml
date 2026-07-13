@@ -1,0 +1,28 @@
+# spageth xatu observer config. Pass with --xatu.config.
+# Every eth handshake (inbound and outbound, successful or rejected) is exported
+# as a NODE_RECORD_EXECUTION event to the xatu server named below.
+
+name: spageth
+version: 1.0.0
+implementation: spageth
+loggingLevel: info
+
+# Attached to every event's client meta. Free-form.
+labels:
+  region: syd1
+
+ethereum:
+  network:
+    # Human-friendly name; becomes the ClickHouse partition key. The numeric id
+    # is taken from each peer's Status at emit time.
+    name: mainnet
+
+output:
+  address: xatu.example.internal:8080
+  tls: true
+  headers:
+    # xatu accepts Basic auth only.
+    Authorization: "Basic <base64(user:pass)>"
+  # Batching / retry defaults are inherited from the xatu output client and can
+  # be overridden here (maxQueueSize, batchTimeout, maxExportBatchSize, workers,
+  # retry, keepAlive).
