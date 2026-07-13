@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/creasty/defaults"
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
@@ -229,6 +230,14 @@ func loadConfig(path string) (*Config, error) {
 	cfg := DefaultConfig()
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse xatu observer config: %w", err)
+	}
+
+	// Populate any unset fields — including the batching, retry and keepalive
+	// defaults on the embedded xatu output config — from their struct tags,
+	// exactly as xatu's own output loader does. Without this a minimal config
+	// (just address + auth) would pass zero values to the batch processor.
+	if err := defaults.Set(cfg); err != nil {
+		return nil, fmt.Errorf("failed to apply xatu observer config defaults: %w", err)
 	}
 
 	return cfg, nil
