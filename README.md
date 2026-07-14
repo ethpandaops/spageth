@@ -6,12 +6,19 @@
 
 <p align="center"><em>geth, but it eats the whole bowl.</em></p>
 
-spageth is a thin observability fork of [go-ethereum](https://github.com/ethereum/go-ethereum).
-It runs as a normal, fully-synced geth node and exports a `NODE_RECORD_EXECUTION`
-event to a [xatu](https://github.com/ethpandaops/xatu) server for **every eth
-handshake it performs** — inbound and outbound, successful or rejected. That's
-it. No consensus changes, no new RPC surface, no behavioural change when the
-observer is switched off.
+spageth is ethPandaOps' observability distribution of
+[go-ethereum](https://github.com/ethereum/go-ethereum): a normal, fully-synced
+geth node carrying a small stack of **independently-toggleable observability
+features**. Each feature is off by default (unset flag → stock-geth behaviour),
+so one image serves any combination.
+
+| Feature | Enable with | What it does | Transport |
+|---|---|---|---|
+| **EL node records** | `--xatu.config <path>` | Emits a `NODE_RECORD_EXECUTION` event for every eth handshake (inbound & outbound, success or rejected), capturing the peer population outbound crawlers miss | xatu output client → xatu server |
+| **State metrics** | `--vmtrace statesize` | Per-block state write/delete activity (accounts, storage, trie, code — counts, bytes, trie-node depth) as a structured JSON log line | stdout → Vector `sentry-logs` pipeline |
+
+New observability features are added as self-registering live tracers or small
+overlay packages — one file, no core-patch growth. See [How it works](#how-it-works).
 
 ## Why this exists
 
@@ -49,10 +56,18 @@ Two pieces, kept strictly separate so upstream rebases stay cheap:
    - A one-line config field + CLI flag to switch the observer on.
 
 2. **The overlay** (`overlay/`) — new files that never conflict on rebase:
-   `eth/xatuobserver/` (the observer: config, event builder, xatu sink lifecycle)
-   and `eth/backend_xatu.go` (wires the observer into the backend). The observer
-   imports xatu's own output client, so batching, retries, gzip and metrics
-   behave exactly as they do everywhere else in the ecosystem.
+   - `eth/xatuobserver/` + `eth/backend_xatu.go` — the node-records observer. It
+     imports xatu's own output client, so batching, retries, gzip and metrics
+     behave exactly as they do everywhere else in the ecosystem.
+   - `eth/tracers/live/statesize.go` — the state-metrics live tracer (originally
+     Wei Han's). It self-registers under geth's existing `--vmtrace statesize`
+     and needs **zero** core-patch changes: it compiles against upstream's
+     `core/tracing` `OnStateUpdate` hook and emits JSON log lines. Adding a new
+     tracer-based feature costs exactly one overlay file.
+
+The base patch stays small and stable precisely because features prefer the
+overlay: a feature only touches `base.patch` if it genuinely needs a new core
+hook (as node-records does), otherwise it's a self-contained overlay file.
 
 The upstream clone is fetched fresh at build time — this repo contains no
 go-ethereum source. `go.mod`/`go.sum` edits are applied by `update-deps.sh`
@@ -82,11 +97,13 @@ docker build -f ci/Dockerfile -t ghcr.io/ethpandaops/spageth --build-arg UPSTREA
 ## Run
 
 ```sh
-geth --xatu.config /etc/spageth/config.yaml --maxpeers 500
+# node records + state metrics on one node; enable whichever you want
+geth --xatu.config /etc/spageth/config.yaml --maxpeers 500 --vmtrace statesize
 ```
 
-See [`example.config.yaml`](example.config.yaml) for the observer config. With no
-`--xatu.config`, spageth behaves exactly like stock geth.
+See [`example.config.yaml`](example.config.yaml) for the node-records observer
+config. `--vmtrace statesize` needs no config. With neither flag set, spageth
+behaves exactly like stock geth.
 
 ### Configurable everything
 
@@ -116,8 +133,10 @@ or it will rot like any fork.
 ## Layout
 
 ```
-patches/ethereum/go-ethereum/<ref>/base.patch   upstream-file edits
-overlay/                                         new files copied into the clone
+patches/ethereum/go-ethereum/<ref>/base.patch   upstream-file edits (shared hooks)
+overlay/eth/xatuobserver/                        feature: EL node records (xatu)
+overlay/eth/backend_xatu.go                      wires the node-records observer
+overlay/eth/tracers/live/statesize.go            feature: state metrics (--vmtrace statesize)
 scripts/spageth-build.sh                         clone → apply → deps → build
 scripts/apply-patch.sh                           patch + overlay (3-way fallback)
 scripts/save-patch.sh                            regenerate base.patch after a fix
