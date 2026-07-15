@@ -10,6 +10,12 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Validate every tracked upstream ref: master (bleeding edge) and the
+        # current release tag. Keep in sync with check-patches.yml.
+        ref: [master, v1.17.4]
     steps:
       - uses: actions/checkout@v4
 
@@ -17,8 +23,8 @@ jobs:
         with:
           go-version: "1.26.5"
 
-      - name: Build spageth
-        run: scripts/spageth-build.sh --ref master
+      - name: Build spageth (${{ matrix.ref }})
+        run: scripts/spageth-build.sh --ref ${{ matrix.ref }}
 
       - name: Run overlay tests
         run: |
