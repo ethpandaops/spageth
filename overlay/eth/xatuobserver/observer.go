@@ -26,6 +26,7 @@ import (
 	"github.com/ethpandaops/xatu/pkg/proto/noderecord"
 	xatuproto "github.com/ethpandaops/xatu/pkg/proto/xatu"
 
+	"github.com/ethereum/go-ethereum/core/types"
 	ethproto "github.com/ethereum/go-ethereum/eth/protocols/eth"
 )
 
@@ -35,6 +36,12 @@ type Observer struct {
 	config *Config
 	log    logrus.FieldLogger
 	sink   *xatu.Xatu
+
+	// firstSeen, signer and networkID are only populated when the mempool
+	// observer is enabled via EnableMempool.
+	firstSeen *firstSeenCache
+	signer    types.Signer
+	networkID uint64
 }
 
 // New constructs an Observer from a config file on disk. It creates but does

@@ -1,8 +1,8 @@
 diff --git a/cmd/geth/main.go b/cmd/geth/main.go
-index 14e3a54..d4f6181 100644
+index b5802f5..2cc5a98 100644
 --- a/cmd/geth/main.go
 +++ b/cmd/geth/main.go
-@@ -124,6 +124,11 @@ var (
+@@ -125,6 +125,11 @@ var (
  		utils.DeveloperGasLimitFlag,
  		utils.DeveloperPeriodFlag,
  		utils.VMEnableDebugFlag,
@@ -15,10 +15,10 @@ index 14e3a54..d4f6181 100644
  		utils.VMTraceJsonConfigFlag,
  		utils.VMWitnessStatsFlag,
 diff --git a/cmd/utils/flags.go b/cmd/utils/flags.go
-index fd9893f..c62d9ca 100644
+index 8b06772..4322b30 100644
 --- a/cmd/utils/flags.go
 +++ b/cmd/utils/flags.go
-@@ -615,6 +615,31 @@ var (
+@@ -620,6 +620,31 @@ var (
  		Usage:    "Record information useful for VM and contract debugging",
  		Category: flags.VMCategory,
  	}
@@ -50,7 +50,7 @@ index fd9893f..c62d9ca 100644
  	VMTraceFlag = &cli.StringFlag{
  		Name:     "vmtrace",
  		Usage:    "Name of tracer which should record internal VM operations (costly)",
-@@ -1479,6 +1504,9 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config) {
+@@ -1490,6 +1515,9 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config) {
  	if ctx.IsSet(MaxPendingPeersFlag.Name) {
  		cfg.MaxPendingPeers = ctx.Int(MaxPendingPeersFlag.Name)
  	}
@@ -60,7 +60,7 @@ index fd9893f..c62d9ca 100644
  	if ctx.IsSet(NoDiscoverFlag.Name) {
  		cfg.NoDiscovery = ctx.Bool(NoDiscoverFlag.Name)
  	}
-@@ -2070,6 +2098,19 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
+@@ -2090,6 +2118,19 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
  		}
  	}()
  
@@ -81,7 +81,7 @@ index fd9893f..c62d9ca 100644
  	if ctx.IsSet(VMTraceFlag.Name) {
  		if name := ctx.String(VMTraceFlag.Name); name != "" {
 diff --git a/eth/backend.go b/eth/backend.go
-index 72bda31..b9ee722 100644
+index c880e75..23feb19 100644
 --- a/eth/backend.go
 +++ b/eth/backend.go
 @@ -362,7 +362,12 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
@@ -166,10 +166,10 @@ index 36c970e..9ffbe4c 100644
  			return
  		}
 diff --git a/eth/ethconfig/config.go b/eth/ethconfig/config.go
-index 378bb64..37681b3 100644
+index c6f2fad..79d87ab 100644
 --- a/eth/ethconfig/config.go
 +++ b/eth/ethconfig/config.go
-@@ -189,6 +189,21 @@ type Config struct {
+@@ -190,6 +190,21 @@ type Config struct {
  	// It is not safe to enable on public networks yet.
  	SnapV2 bool
  
@@ -192,10 +192,10 @@ index 378bb64..37681b3 100644
  	VMTrace           string
  	VMTraceJsonConfig string
 diff --git a/eth/handler.go b/eth/handler.go
-index 4a9573e..a81e08d 100644
+index 4a9573e..8f2852d 100644
 --- a/eth/handler.go
 +++ b/eth/handler.go
-@@ -134,6 +134,10 @@ type handler struct {
+@@ -134,6 +134,14 @@ type handler struct {
  
  	requiredBlocks map[uint64]common.Hash
  
@@ -203,10 +203,14 @@ index 4a9573e..a81e08d 100644
 +	// the peer and the handshake result, before any capacity-based rejection.
 +	peerObserver func(*eth.Peer, error)
 +
++	// txObserver, when set, is invoked with every batch of transactions received
++	// over the wire (broadcast or pooled reply), before they are handled.
++	txObserver func(*p2p.Peer, []*types.Transaction)
++
  	// channels for fetcher, syncer, txsyncLoop
  	quitSync chan struct{}
  
-@@ -244,8 +248,14 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
+@@ -244,8 +252,14 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
  	// Execute the Ethereum handshake
  	if err := peer.Handshake(h.networkID, h.chain, h.blockRange.currentRange()); err != nil {
  		peer.Log().Debug("Ethereum handshake failed", "err", err)
@@ -221,6 +225,30 @@ index 4a9573e..a81e08d 100644
  	reject := false // reserved peer slots
  	if h.downloader.ConfigSyncMode() == ethconfig.SnapSync {
  		// A peer is useful to the active state syncer only if it offers the snap
+diff --git a/eth/handler_eth.go b/eth/handler_eth.go
+index 7922687..8dd45a6 100644
+--- a/eth/handler_eth.go
++++ b/eth/handler_eth.go
+@@ -66,6 +66,9 @@ func (h *ethHandler) Handle(peer *eth.Peer, packet eth.Packet) error {
+ 		if err != nil {
+ 			return fmt.Errorf("Transactions: %v", err)
+ 		}
++		if h.txObserver != nil {
++			h.txObserver(peer.Peer, txs)
++		}
+ 		if err := handleTransactions(peer, txs, true); err != nil {
+ 			return fmt.Errorf("Transactions: %v", err)
+ 		}
+@@ -76,6 +79,9 @@ func (h *ethHandler) Handle(peer *eth.Peer, packet eth.Packet) error {
+ 		if err != nil {
+ 			return fmt.Errorf("PooledTransactions: %v", err)
+ 		}
++		if h.txObserver != nil {
++			h.txObserver(peer.Peer, txs)
++		}
+ 		if err := handleTransactions(peer, txs, false); err != nil {
+ 			return fmt.Errorf("PooledTransactions: %v", err)
+ 		}
 diff --git a/eth/protocols/eth/handshake.go b/eth/protocols/eth/handshake.go
 index 359e4e3..77bb5f4 100644
 --- a/eth/protocols/eth/handshake.go
