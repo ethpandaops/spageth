@@ -17,6 +17,15 @@ ethereum:
     # is taken from each peer's Status at emit time.
     name: mainnet
 
+# Optional. Emit a MEMPOOL_TRANSACTION_V2 event the first time this node sees
+# each transaction over the wire, deduplicated by hash (first-seen-per-tx, not
+# per-peer). Off by default; node records work unchanged when this is omitted.
+mempool:
+  enabled: true
+  # Bounds the first-seen dedup cache by number of tx hashes; older entries are
+  # evicted LRU-style to cap memory. Defaults to 1000000 when unset.
+  cacheSize: 1000000
+
 output:
   address: xatu.example.internal:8080
   tls: true

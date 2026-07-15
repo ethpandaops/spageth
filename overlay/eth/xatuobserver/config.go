@@ -23,8 +23,23 @@ type Config struct {
 	Labels map[string]string `yaml:"labels"`
 	// Ethereum describes the network this node is attached to.
 	Ethereum EthereumConfig `yaml:"ethereum"`
+	// Mempool controls the mempool_transaction first-seen observer.
+	Mempool MempoolConfig `yaml:"mempool"`
 	// Output is the xatu output client config (address, headers, tls, batching).
 	Output xatu.Config `yaml:"output"`
+}
+
+// MempoolConfig controls the mempool_transaction first-seen observer. It is
+// disabled by default, so node records behave exactly as before unless it is
+// switched on.
+type MempoolConfig struct {
+	// Enabled emits a MEMPOOL_TRANSACTION_V2 event the first time this node
+	// receives each transaction over the wire, deduplicated by hash.
+	Enabled bool `yaml:"enabled" default:"false"`
+	// CacheSize bounds the first-seen dedup cache by number of transaction
+	// hashes; older entries are evicted LRU-style to cap memory. Zero uses the
+	// default.
+	CacheSize int `yaml:"cacheSize" default:"1000000"`
 }
 
 // EthereumConfig describes the attached network.

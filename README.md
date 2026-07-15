@@ -15,6 +15,7 @@ so one image serves any combination.
 | Feature | Enable with | What it does | Transport |
 |---|---|---|---|
 | **EL node records** | `--xatu.config <path>` | Emits a `NODE_RECORD_EXECUTION` event for every eth handshake (inbound & outbound, success or rejected), capturing the peer population outbound crawlers miss | xatu output client → xatu server |
+| **Mempool transactions** | `mempool.enabled: true` in `--xatu.config` | Emits a `MEMPOOL_TRANSACTION_V2` event the first time this node sees each transaction over the wire, deduplicated by hash (first-seen-per-tx). Reuses the node-records xatu sink; needs the `base.patch` `txObserver` hook (unlike the zero-patch statesize tracer) | xatu output client → xatu server |
 | **State metrics** | `--vmtrace statesize` | Per-block state write/delete activity (accounts, storage, trie, code — counts, bytes, trie-node depth) as a structured JSON log line | stdout → Vector `sentry-logs` pipeline |
 
 New observability features are added as self-registering live tracers or small
@@ -49,16 +50,18 @@ Two pieces, kept strictly separate so upstream rebases stay cheap:
    - Capture the peer's raw `Status` packet in `readStatus` **before** validation,
      so we record peers on other networks/forks too.
    - A `peerObserver` hook on the eth handler, fired once per handshake before
-     the capacity-based reject.
+     the capacity-based reject, and a sibling `txObserver` hook fired with every
+     batch of transactions received over the wire (powers mempool first-seen).
    - Retain the remote's advertised listen port from the devp2p Hello (otherwise
      lost for inbound peers).
    - Make peer churn and the dial-history window configurable (see flags below).
    - A one-line config field + CLI flag to switch the observer on.
 
 2. **The overlay** (`overlay/`) — new files that never conflict on rebase:
-   - `eth/xatuobserver/` + `eth/backend_xatu.go` — the node-records observer. It
-     imports xatu's own output client, so batching, retries, gzip and metrics
-     behave exactly as they do everywhere else in the ecosystem.
+   - `eth/xatuobserver/` + `eth/backend_xatu.go` — the node-records observer and
+     the mempool first-seen observer (`mempool.go`), which share one xatu output
+     client, so batching, retries, gzip and metrics behave exactly as they do
+     everywhere else in the ecosystem.
    - `eth/tracers/live/statesize.go` — the state-metrics live tracer (originally
      Wei Han's). It self-registers under geth's existing `--vmtrace statesize`
      and needs **zero** core-patch changes: it compiles against upstream's

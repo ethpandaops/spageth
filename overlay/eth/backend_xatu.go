@@ -20,6 +20,14 @@ func (s *Ethereum) initXatuObserver(stack *node.Node) error {
 	}
 
 	s.handler.peerObserver = observer.Observe
+
+	if observer.MempoolEnabled() {
+		observer.EnableMempool(s.blockchain.Config().ChainID)
+		s.handler.txObserver = observer.ObserveTx
+
+		log.Info("Xatu mempool_transaction observer enabled")
+	}
+
 	stack.RegisterLifecycle(observer)
 
 	log.Info("Xatu observer enabled", "config", s.config.XatuConfig)
