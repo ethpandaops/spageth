@@ -147,3 +147,27 @@ func TestBuildMempoolEvent(t *testing.T) {
 		t.Errorf("type = %d, want %d", add.GetType().GetValue(), types.DynamicFeeTxType)
 	}
 }
+
+func TestCountConsecutiveEmptyBytes(t *testing.T) {
+	cases := []struct {
+		name      string
+		data      []byte
+		threshold int
+		want      int
+	}{
+		{"empty input", nil, 4, 0},
+		{"short run below threshold", []byte{0, 0, 0, 1}, 4, 0},
+		{"run above threshold", []byte{0, 0, 0, 0, 0, 1}, 4, 5},
+		{"trailing run counted", []byte{1, 0, 0, 0, 0, 0}, 4, 5},
+		{"multiple runs summed", []byte{0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0}, 4, 11},
+		{"non-zero only", []byte{1, 2, 3}, 4, 0},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := countConsecutiveEmptyBytes(tc.data, tc.threshold); got != tc.want {
+				t.Errorf("countConsecutiveEmptyBytes(%v) = %d, want %d", tc.data, got, tc.want)
+			}
+		})
+	}
+}

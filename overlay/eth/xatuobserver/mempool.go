@@ -190,7 +190,47 @@ func (o *Observer) additionalData(tx *types.Transaction) *xatuproto.ClientMeta_A
 		data.BlobGas = wrapperspb.UInt64(tx.BlobGas())
 		data.BlobGasFeeCap = tx.BlobGasFeeCap().String()
 		data.BlobHashes = blobHashes
+
+		if sidecar := tx.BlobTxSidecar(); sidecar != nil {
+			var size, emptySize int
+
+			for i := range sidecar.Blobs {
+				blob := sidecar.Blobs[i][:]
+				size += len(blob)
+				emptySize += countConsecutiveEmptyBytes(blob, 4)
+			}
+
+			data.BlobSidecarsSize = fmt.Sprintf("%d", size)
+			data.BlobSidecarsEmptySize = fmt.Sprintf("%d", emptySize)
+		}
 	}
 
 	return data
+}
+
+// countConsecutiveEmptyBytes counts bytes that belong to a run of zero bytes
+// longer than threshold. It mirrors the blob-emptiness metric the xatu sentry
+// records so spageth-sourced blob transactions carry the same sidecar fields.
+func countConsecutiveEmptyBytes(b []byte, threshold int) int {
+	count, run := 0, 0
+
+	for _, v := range b {
+		if v == 0 {
+			run++
+
+			continue
+		}
+
+		if run > threshold {
+			count += run
+		}
+
+		run = 0
+	}
+
+	if run > threshold {
+		count += run
+	}
+
+	return count
 }
