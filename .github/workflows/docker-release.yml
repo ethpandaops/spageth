@@ -87,6 +87,11 @@ jobs:
 
   # Master canary: rebuilds against upstream master so the bleeding-edge image
   # tracks whatever the daily patch check keeps green.
+  #
+  # On a version-tag push this also publishes the immutable master builds
+  # (geth-master-<version> and the <version>-master alias the fleet pins to), so
+  # a master-based deployment can name exactly which overlay it runs — the
+  # release job only version-pins the release-based image.
   master-canary:
     runs-on: ubuntu-latest
     steps:
@@ -100,6 +105,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Resolve master tags
+        id: meta
+        run: |
+          tags="${IMAGE}:geth-master,${IMAGE}:master"
+          # On a version tag, also publish immutable master builds.
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            v="${GITHUB_REF_NAME}"
+            tags="${tags},${IMAGE}:geth-master-${v},${IMAGE}:${v}-master"
+          fi
+          echo "tags=${tags}" >> "$GITHUB_OUTPUT"
+          echo "Master canary -> ${tags}"
+
       - uses: docker/build-push-action@v6
         with:
           context: .
@@ -109,4 +126,4 @@ jobs:
           build-args: |
             UPSTREAM_REF=master
             XATU_VERSION=latest
-          tags: ${{ env.IMAGE }}:geth-master,${{ env.IMAGE }}:master
+          tags: ${{ steps.meta.outputs.tags }}

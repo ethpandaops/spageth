@@ -112,7 +112,12 @@ you can read "geth vX.Y.Z + spageth overlay vA.B.C" straight off the tag:
 | `geth-<GETH_REF>-<SPAGETH_VERSION>` | fully qualified, e.g. `geth-v1.17.4-v0.2.0` | immutable |
 | `geth-<GETH_REF>` | latest overlay on that geth ref, e.g. `geth-v1.17.4` | moving |
 | `latest` | the latest geth release build | moving |
+| `geth-master-<SPAGETH_VERSION>` / `<SPAGETH_VERSION>-master` | master + that overlay, e.g. `v0.4.0-master` | immutable |
 | `geth-master` / `master` | master canary | moving |
+
+The `<SPAGETH_VERSION>-master` alias is what master-based deployments pin to,
+so an operator running upstream master can still name exactly which overlay is
+baked in. Both immutable master tags are published on a version-tag release.
 
 `SPAGETH_VERSION` is the git tag that triggered the release (or a short SHA for
 untagged builds); `GETH_REF` is the upstream go-ethereum ref built against.
