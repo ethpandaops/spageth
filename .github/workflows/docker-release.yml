@@ -2,14 +2,22 @@ name: docker-release
 
 # Builds and pushes the spageth image to GitHub Container Registry on a version
 # tag or manual dispatch. Uses the built-in GITHUB_TOKEN — no registry secrets.
+#
+# Image tags encode BOTH the upstream geth ref and the spageth overlay version
+# so an operator can read "geth vX.Y.Z + spageth overlay vA.B.C" off the tag:
+#
+#   geth-<GETH_REF>-<SPAGETH_VERSION>  immutable, fully qualified (geth-v1.17.4-v0.2.0)
+#   geth-<GETH_REF>                    moving: latest overlay on that geth ref (geth-v1.17.4)
+#   latest                             the latest geth release build
+#   geth-master / master               master canary
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
     inputs:
       upstream_ref:
-        description: "Upstream go-ethereum ref to build"
-        default: "master"
+        description: "Upstream go-ethereum ref to build (blank = latest release tag)"
+        default: ""
 
 env:
   IMAGE: ghcr.io/${{ github.repository }}
@@ -19,12 +27,13 @@ permissions:
   packages: write
 
 jobs:
-  docker:
+  # Release build: tracks the latest upstream go-ethereum release tag (or a
+  # dispatch-supplied ref) and publishes the version-encoded tags.
+  release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
@@ -33,13 +42,34 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Compute tags
+      - name: Resolve build parameters
         id: meta
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_REF: ${{ github.event.inputs.upstream_ref }}
         run: |
-          ref="${{ github.event.inputs.upstream_ref || 'master' }}"
-          version="${GITHUB_REF_NAME:-latest}"
-          echo "tags=${IMAGE}:${version}-${ref},${IMAGE}:${ref},${IMAGE}:latest" >> "$GITHUB_OUTPUT"
-          echo "ref=${ref}" >> "$GITHUB_OUTPUT"
+          # SPAGETH_VERSION: the git tag that triggered the release, else short SHA.
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            spageth_version="${GITHUB_REF_NAME}"
+          else
+            spageth_version="$(git rev-parse --short HEAD)"
+          fi
+
+          # Latest upstream geth release tag.
+          latest_release="$(gh api repos/ethereum/go-ethereum/releases/latest --jq .tag_name)"
+
+          # GETH_REF: dispatch override if given, else the latest release.
+          geth_ref="${INPUT_REF:-$latest_release}"
+
+          tags="${IMAGE}:geth-${geth_ref}-${spageth_version},${IMAGE}:geth-${geth_ref}"
+          # Only move :latest when we built against the current latest release.
+          if [ "${geth_ref}" = "${latest_release}" ]; then
+            tags="${tags},${IMAGE}:latest"
+          fi
+
+          echo "geth_ref=${geth_ref}" >> "$GITHUB_OUTPUT"
+          echo "tags=${tags}" >> "$GITHUB_OUTPUT"
+          echo "Building geth ${geth_ref} + spageth ${spageth_version} -> ${tags}"
 
       - uses: docker/build-push-action@v6
         with:
@@ -51,6 +81,32 @@ jobs:
           platforms: linux/amd64
           push: true
           build-args: |
-            UPSTREAM_REF=${{ steps.meta.outputs.ref }}
+            UPSTREAM_REF=${{ steps.meta.outputs.geth_ref }}
             XATU_VERSION=latest
           tags: ${{ steps.meta.outputs.tags }}
+
+  # Master canary: rebuilds against upstream master so the bleeding-edge image
+  # tracks whatever the daily patch check keeps green.
+  master-canary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ci/Dockerfile
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            UPSTREAM_REF=master
+            XATU_VERSION=latest
+          tags: ${{ env.IMAGE }}:geth-master,${{ env.IMAGE }}:master

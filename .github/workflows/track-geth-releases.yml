@@ -1,0 +1,77 @@
+name: track-geth-releases
+
+# Watches for new upstream go-ethereum releases and publishes a spageth image
+# built against the latest one. If the new release has no patch directory yet,
+# the workflow fails loudly so a human generates the patch (see check-patches
+# and scripts/save-patch.sh) — we never silently ship an unbuilt release.
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch: {}
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  track:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve latest geth release
+        id: geth
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          geth_ref="$(gh api repos/ethereum/go-ethereum/releases/latest --jq .tag_name)"
+          echo "ref=${geth_ref}" >> "$GITHUB_OUTPUT"
+          echo "Latest go-ethereum release: ${geth_ref}"
+
+      - name: Ensure a patch exists for the release
+        env:
+          GETH_REF: ${{ steps.geth.outputs.ref }}
+        run: |
+          if [ ! -d "patches/ethereum/go-ethereum/${GETH_REF}" ]; then
+            echo "::error::No patch directory for go-ethereum ${GETH_REF}."
+            echo "A human must generate patches/ethereum/go-ethereum/${GETH_REF}/base.patch:"
+            echo "  1. Clone go-ethereum at ${GETH_REF} (full clone, not --depth 1)."
+            echo "  2. Apply the nearest existing base.patch; resolve rejected hunks"
+            echo "     (eth/dropper.go is the version-sensitive one)."
+            echo "  3. Regenerate: UPSTREAM_REF=${GETH_REF} scripts/save-patch.sh"
+            echo "  4. Commit the new patch directory."
+            exit 1
+          fi
+          echo "Found patch directory for ${GETH_REF}."
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute tags
+        id: meta
+        env:
+          GETH_REF: ${{ steps.geth.outputs.ref }}
+        run: |
+          short_sha="$(git rev-parse --short HEAD)"
+          tags="${IMAGE}:geth-${GETH_REF},${IMAGE}:geth-${GETH_REF}-${short_sha}"
+          echo "tags=${tags}" >> "$GITHUB_OUTPUT"
+          echo "Publishing ${tags}"
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ci/Dockerfile
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            UPSTREAM_REF=${{ steps.geth.outputs.ref }}
+            XATU_VERSION=latest
+          tags: ${{ steps.meta.outputs.tags }}
