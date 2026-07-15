@@ -78,20 +78,46 @@ every upstream change.
 
 ```sh
 # Clone upstream, apply patch + overlay, wire deps, build the binary.
-scripts/spageth-build.sh --ref master
+# --ref takes either a branch (master) or an upstream release tag (v1.17.4).
+scripts/spageth-build.sh --ref v1.17.4
 # → go-ethereum/build/bin/geth
+
+# Bleeding edge instead:
+scripts/spageth-build.sh --ref master
 ```
 
-Or pull the prebuilt image from GitHub Container Registry:
+Patches are **per upstream ref** — `patches/ethereum/go-ethereum/<ref>/base.patch`.
+The core hooks are additive, but the version-sensitive edit (`eth/dropper.go`)
+differs between master and each release, so every ref carries its own patch. To
+add support for a new geth release, generate its patch (see [Maintenance](#maintenance)).
+
+Or pull a prebuilt image from GitHub Container Registry:
 
 ```sh
-docker pull ghcr.io/ethpandaops/spageth:master
+docker pull ghcr.io/ethpandaops/spageth:latest          # latest geth release + latest overlay
+docker pull ghcr.io/ethpandaops/spageth:geth-v1.17.4    # latest overlay on geth v1.17.4
+docker pull ghcr.io/ethpandaops/spageth:master          # master canary
 ```
 
-Or build it yourself:
+### Image tag scheme
+
+Tags encode **both** the upstream geth ref and the spageth overlay version, so
+you can read "geth vX.Y.Z + spageth overlay vA.B.C" straight off the tag:
+
+| Tag | Meaning | Mutability |
+|---|---|---|
+| `geth-<GETH_REF>-<SPAGETH_VERSION>` | fully qualified, e.g. `geth-v1.17.4-v0.2.0` | immutable |
+| `geth-<GETH_REF>` | latest overlay on that geth ref, e.g. `geth-v1.17.4` | moving |
+| `latest` | the latest geth release build | moving |
+| `geth-master` / `master` | master canary | moving |
+
+`SPAGETH_VERSION` is the git tag that triggered the release (or a short SHA for
+untagged builds); `GETH_REF` is the upstream go-ethereum ref built against.
+
+Or build an image yourself against any ref:
 
 ```sh
-docker build -f ci/Dockerfile -t ghcr.io/ethpandaops/spageth --build-arg UPSTREAM_REF=master .
+docker build -f ci/Dockerfile -t spageth --build-arg UPSTREAM_REF=v1.17.4 .
 ```
 
 ## Run
@@ -123,12 +149,32 @@ peers per hour; raise `--churn.dialhistory` to widen outbound coverage.
 
 ## Maintenance
 
-`check-patches.yml` rebuilds spageth against upstream `master` every day. If a
-3-way merge is needed it commits the regenerated patch back automatically; if the
-patch fails outright the workflow goes red and a human fixes the clone and runs
-`scripts/save-patch.sh`. The patch surface is small and additive, so conflicts
-are rare and cheap — but this repo still needs an owner watching that workflow,
-or it will rot like any fork.
+`check-patches.yml` rebuilds spageth against every tracked ref (`master` and the
+current release tag) daily. If a 3-way merge is needed it commits the regenerated
+patch back automatically; if the patch fails outright the workflow goes red and a
+human fixes the clone and runs `scripts/save-patch.sh`. The patch surface is small
+and additive, so conflicts are rare and cheap — but this repo still needs an owner
+watching that workflow, or it will rot like any fork.
+
+`track-geth-releases.yml` runs daily too and resolves the latest go-ethereum
+release. If that release has no `patches/ethereum/go-ethereum/<tag>/` directory
+yet, it **fails loudly** — that's the signal to generate the patch for the new
+release. Otherwise it builds and publishes the `geth-<tag>` image.
+
+### Generating a patch for a new geth release
+
+```sh
+# 1. Full clone at the new tag (full, not --depth 1 — 3-way merge needs blobs).
+git clone --branch v1.18.0 https://github.com/ethereum/go-ethereum.git /tmp/geth
+# 2. Apply the nearest existing base.patch; resolve rejected hunks. In practice
+#    only eth/dropper.go rejects — the churn/drop edit is version-sensitive.
+cd /tmp/geth && git apply --reject <spageth>/patches/ethereum/go-ethereum/master/base.patch
+#    ...hand-port the dropper.go .rej hunks onto this release's dropper.go...
+# 3. Regenerate a clean patch (strips overlay + go.mod, keeps only upstream edits).
+CLONE_DIR=/tmp/geth UPSTREAM_REF=v1.18.0 <spageth>/scripts/save-patch.sh
+# 4. Confirm it builds, then add the tag to check-patches.yml's matrix and commit.
+<spageth>/scripts/spageth-build.sh --ref v1.18.0
+```
 
 ## Layout
 

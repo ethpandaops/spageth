@@ -6,7 +6,11 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/config.sh"
 
 [ -d "$CLONE_DIR" ] || die "clone not found at $CLONE_DIR (run spageth-build.sh)"
-[ -f "$PATCH_DIR/base.patch" ] || die "no base.patch for ref '$UPSTREAM_REF' at $PATCH_DIR"
+[ -f "$PATCH_DIR/base.patch" ] || die "no base.patch for ref '$UPSTREAM_REF' at $PATCH_DIR
+  Each upstream ref needs its own patch — the master patch does not apply to release tags.
+  Generate one by hand: clone go-ethereum at '$UPSTREAM_REF', apply the nearest existing
+  base.patch, resolve any rejected hunks (eth/dropper.go is the version-sensitive one),
+  then regenerate with UPSTREAM_REF=$UPSTREAM_REF scripts/save-patch.sh"
 
 cd "$CLONE_DIR"
 
