@@ -15,7 +15,7 @@ jobs:
       matrix:
         # Validate every tracked upstream ref: master (bleeding edge) and the
         # current release tag. Keep in sync with check-patches.yml.
-        ref: [master, v1.17.4]
+        ref: [master, v1.17.4, v1.17.6]
     steps:
       - uses: actions/checkout@v4
 

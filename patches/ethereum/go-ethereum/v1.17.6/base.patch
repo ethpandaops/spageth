@@ -15,10 +15,10 @@ index 1a32f0c..d3b9682 100644
  		utils.VMTraceJsonConfigFlag,
  		utils.VMWitnessStatsFlag,
 diff --git a/cmd/utils/flags.go b/cmd/utils/flags.go
-index 280c1f5..2ed2e55 100644
+index 65c1005..c766c39 100644
 --- a/cmd/utils/flags.go
 +++ b/cmd/utils/flags.go
-@@ -628,6 +628,31 @@ var (
+@@ -627,6 +627,31 @@ var (
  		Usage:    "Record information useful for VM and contract debugging",
  		Category: flags.VMCategory,
  	}
@@ -50,7 +50,7 @@ index 280c1f5..2ed2e55 100644
  	VMTraceFlag = &cli.StringFlag{
  		Name:     "vmtrace",
  		Usage:    "Name of tracer which should record internal VM operations (costly)",
-@@ -1492,6 +1517,9 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config) {
+@@ -1491,6 +1516,9 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config) {
  	if ctx.IsSet(MaxPendingPeersFlag.Name) {
  		cfg.MaxPendingPeers = ctx.Int(MaxPendingPeersFlag.Name)
  	}
@@ -81,10 +81,10 @@ index 280c1f5..2ed2e55 100644
  	if ctx.IsSet(VMTraceFlag.Name) {
  		if name := ctx.String(VMTraceFlag.Name); name != "" {
 diff --git a/eth/backend.go b/eth/backend.go
-index 25c541e..d0ea2e6 100644
+index 991d2be..346d8a8 100644
 --- a/eth/backend.go
 +++ b/eth/backend.go
-@@ -366,7 +366,12 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
+@@ -367,7 +367,12 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
  		return nil, err
  	}
  
@@ -166,7 +166,7 @@ index 36c970e..9ffbe4c 100644
  			return
  		}
 diff --git a/eth/ethconfig/config.go b/eth/ethconfig/config.go
-index ab3143b..7c3e1a3 100644
+index 91247a8..bdd0768 100644
 --- a/eth/ethconfig/config.go
 +++ b/eth/ethconfig/config.go
 @@ -188,6 +188,21 @@ type Config struct {
