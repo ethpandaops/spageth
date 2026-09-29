@@ -21,7 +21,7 @@ jobs:
         # operators actually run. Each ref has its own patch dir. When a new
         # go-ethereum release lands, add its tag here (track-geth-releases.yml
         # is the signal — it fails until the patch for the new tag exists).
-        ref: [master, v1.17.4]
+        ref: [master, v1.17.4, v1.17.6]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
