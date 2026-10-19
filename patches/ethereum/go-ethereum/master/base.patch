@@ -1,8 +1,8 @@
 diff --git a/cmd/geth/main.go b/cmd/geth/main.go
-index 1a32f0c..d3b9682 100644
+index a9a21a2..924b565 100644
 --- a/cmd/geth/main.go
 +++ b/cmd/geth/main.go
-@@ -128,6 +128,11 @@ var (
+@@ -129,6 +129,11 @@ var (
  		utils.DeveloperGasLimitFlag,
  		utils.DeveloperPeriodFlag,
  		utils.VMEnableDebugFlag,
@@ -15,7 +15,7 @@ index 1a32f0c..d3b9682 100644
  		utils.VMTraceJsonConfigFlag,
  		utils.VMWitnessStatsFlag,
 diff --git a/cmd/utils/flags.go b/cmd/utils/flags.go
-index 280c1f5..2ed2e55 100644
+index 8c0f72d..3643ac1 100644
 --- a/cmd/utils/flags.go
 +++ b/cmd/utils/flags.go
 @@ -628,6 +628,31 @@ var (
@@ -50,7 +50,7 @@ index 280c1f5..2ed2e55 100644
  	VMTraceFlag = &cli.StringFlag{
  		Name:     "vmtrace",
  		Usage:    "Name of tracer which should record internal VM operations (costly)",
-@@ -1492,6 +1517,9 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config) {
+@@ -1510,6 +1535,9 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config) {
  	if ctx.IsSet(MaxPendingPeersFlag.Name) {
  		cfg.MaxPendingPeers = ctx.Int(MaxPendingPeersFlag.Name)
  	}
@@ -60,7 +60,7 @@ index 280c1f5..2ed2e55 100644
  	if ctx.IsSet(NoDiscoverFlag.Name) {
  		cfg.NoDiscovery = ctx.Bool(NoDiscoverFlag.Name)
  	}
-@@ -2102,6 +2130,19 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
+@@ -2133,6 +2161,19 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
  		}
  	}()
  
@@ -226,10 +226,10 @@ index ed01490..2028676 100644
  	if h.downloader.ConfigSyncMode() == ethconfig.SnapSync {
  		// A peer is useful to the active state syncer only if it offers the snap
 diff --git a/eth/handler_eth.go b/eth/handler_eth.go
-index 0197773..a054405 100644
+index 603c91f..0e26e28 100644
 --- a/eth/handler_eth.go
 +++ b/eth/handler_eth.go
-@@ -80,6 +80,9 @@ func (h *ethHandler) Handle(peer *eth.Peer, packet eth.Packet) error {
+@@ -81,6 +81,9 @@ func (h *ethHandler) Handle(peer *eth.Peer, packet eth.Packet) error {
  		if err != nil {
  			return fmt.Errorf("Transactions: %v", err)
  		}
@@ -239,7 +239,7 @@ index 0197773..a054405 100644
  		if err := handleTransactions(peer, txs, true); err != nil {
  			return fmt.Errorf("Transactions: %v", err)
  		}
-@@ -90,6 +93,9 @@ func (h *ethHandler) Handle(peer *eth.Peer, packet eth.Packet) error {
+@@ -91,6 +94,9 @@ func (h *ethHandler) Handle(peer *eth.Peer, packet eth.Packet) error {
  		if err != nil {
  			return fmt.Errorf("PooledTransactions: %v", err)
  		}
@@ -319,7 +319,7 @@ index 17607a1..46dad83 100644
  	// Disabling is useful for protocol debugging (manual topology).
  	NoDiscovery bool
 diff --git a/p2p/dial.go b/p2p/dial.go
-index 0ffcd10..8b447bb 100644
+index c9a6560..6782bc6 100644
 --- a/p2p/dial.go
 +++ b/p2p/dial.go
 @@ -137,21 +137,25 @@ type dialScheduler struct {
@@ -357,7 +357,7 @@ index 0ffcd10..8b447bb 100644
  	if cfg.log == nil {
  		cfg.log = log.Root()
  	}
-@@ -539,7 +543,7 @@ func (d *dialScheduler) startDial(task *dialTask) {
+@@ -547,7 +551,7 @@ func (d *dialScheduler) startDial(task *dialTask) {
  	node := task.dest()
  	d.log.Trace("Starting p2p dial", "id", node.ID(), "endpoint", nodeEndpointForLog(node), "flag", task.flags)
  	hkey := string(node.ID().Bytes())
