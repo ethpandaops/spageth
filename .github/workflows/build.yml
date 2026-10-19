@@ -21,7 +21,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.5"
+          go-version: "1.26.9"
 
       - name: Build spageth (${{ matrix.ref }})
         run: scripts/spageth-build.sh --ref ${{ matrix.ref }}

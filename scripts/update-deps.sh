@@ -16,7 +16,7 @@ log "Wiring module dependencies (xatu=$XATU_VERSION)"
 go mod edit -replace github.com/ethereum/go-ethereum=./
 
 # xatu needs a newer Go than upstream geth pins.
-go mod edit -go=1.26.2 -toolchain=go1.26.5
+go mod edit -go=1.26.2 -toolchain=go1.26.9
 
 # XATU_REPLACE points the xatu module at a local checkout instead of a released
 # version. Used for local development and CI against an unreleased xatu.
