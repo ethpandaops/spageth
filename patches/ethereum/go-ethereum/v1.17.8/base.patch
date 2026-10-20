@@ -1,5 +1,5 @@
 diff --git a/cmd/geth/main.go b/cmd/geth/main.go
-index 1a32f0c32..d3b9682f6 100644
+index 1a32f0c..d3b9682 100644
 --- a/cmd/geth/main.go
 +++ b/cmd/geth/main.go
 @@ -128,6 +128,11 @@ var (
@@ -15,7 +15,7 @@ index 1a32f0c32..d3b9682f6 100644
  		utils.VMTraceJsonConfigFlag,
  		utils.VMWitnessStatsFlag,
 diff --git a/cmd/utils/flags.go b/cmd/utils/flags.go
-index 280c1f58c..2ed2e55e6 100644
+index 280c1f5..2ed2e55 100644
 --- a/cmd/utils/flags.go
 +++ b/cmd/utils/flags.go
 @@ -628,6 +628,31 @@ var (
@@ -81,7 +81,7 @@ index 280c1f58c..2ed2e55e6 100644
  	if ctx.IsSet(VMTraceFlag.Name) {
  		if name := ctx.String(VMTraceFlag.Name); name != "" {
 diff --git a/eth/backend.go b/eth/backend.go
-index 25c541ec9..d0ea2e660 100644
+index 25c541e..d0ea2e6 100644
 --- a/eth/backend.go
 +++ b/eth/backend.go
 @@ -366,7 +366,12 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
@@ -99,7 +99,7 @@ index 25c541ec9..d0ea2e660 100644
  	eth.miner = miner.New(eth, config.Miner, eth.engine)
  	eth.miner.SetExtra(makeExtraData(config.Miner.ExtraData))
 diff --git a/eth/dropper.go b/eth/dropper.go
-index 36c970e8d..9ffbe4cfb 100644
+index 36c970e..9ffbe4c 100644
 --- a/eth/dropper.go
 +++ b/eth/dropper.go
 @@ -103,6 +103,10 @@ type dropper struct {
@@ -166,7 +166,7 @@ index 36c970e8d..9ffbe4cfb 100644
  			return
  		}
 diff --git a/eth/ethconfig/config.go b/eth/ethconfig/config.go
-index ab3143b8b..7c3e1a340 100644
+index ab3143b..7c3e1a3 100644
 --- a/eth/ethconfig/config.go
 +++ b/eth/ethconfig/config.go
 @@ -188,6 +188,21 @@ type Config struct {
@@ -192,7 +192,7 @@ index ab3143b8b..7c3e1a340 100644
  	VMTrace           string
  	VMTraceJsonConfig string
 diff --git a/eth/handler.go b/eth/handler.go
-index ed0149075..20286761c 100644
+index ed01490..2028676 100644
 --- a/eth/handler.go
 +++ b/eth/handler.go
 @@ -151,6 +151,14 @@ type handler struct {
@@ -226,7 +226,7 @@ index ed0149075..20286761c 100644
  	if h.downloader.ConfigSyncMode() == ethconfig.SnapSync {
  		// A peer is useful to the active state syncer only if it offers the snap
 diff --git a/eth/handler_eth.go b/eth/handler_eth.go
-index 603c91f5d..0e26e2835 100644
+index 603c91f..0e26e28 100644
 --- a/eth/handler_eth.go
 +++ b/eth/handler_eth.go
 @@ -81,6 +81,9 @@ func (h *ethHandler) Handle(peer *eth.Peer, packet eth.Packet) error {
@@ -250,7 +250,7 @@ index 603c91f5d..0e26e2835 100644
  			return fmt.Errorf("PooledTransactions: %v", err)
  		}
 diff --git a/eth/protocols/eth/handshake.go b/eth/protocols/eth/handshake.go
-index 359e4e36b..77bb5f437 100644
+index 359e4e3..77bb5f4 100644
 --- a/eth/protocols/eth/handshake.go
 +++ b/eth/protocols/eth/handshake.go
 @@ -68,6 +68,8 @@ func (p *Peer) readStatus(networkID uint64, status *StatusPacket, genesis common
@@ -263,7 +263,7 @@ index 359e4e36b..77bb5f437 100644
  		return fmt.Errorf("%w: %d (!= %d)", errNetworkIDMismatch, status.NetworkID, networkID)
  	}
 diff --git a/eth/protocols/eth/peer.go b/eth/protocols/eth/peer.go
-index f377734c7..4579426e9 100644
+index f377734..4579426 100644
 --- a/eth/protocols/eth/peer.go
 +++ b/eth/protocols/eth/peer.go
 @@ -67,6 +67,11 @@ type Peer struct {
@@ -294,7 +294,7 @@ index f377734c7..4579426e9 100644
  // This will be nil for peers below protocol version eth/69.
  func (p *Peer) BlockRange() *BlockRangeUpdatePacket {
 diff --git a/p2p/config.go b/p2p/config.go
-index 17607a1f8..46dad8323 100644
+index 17607a1..46dad83 100644
 --- a/p2p/config.go
 +++ b/p2p/config.go
 @@ -20,6 +20,7 @@ import (
@@ -319,7 +319,7 @@ index 17607a1f8..46dad8323 100644
  	// Disabling is useful for protocol debugging (manual topology).
  	NoDiscovery bool
 diff --git a/p2p/dial.go b/p2p/dial.go
-index c9a6560ba..6782bc663 100644
+index c9a6560..6782bc6 100644
 --- a/p2p/dial.go
 +++ b/p2p/dial.go
 @@ -137,21 +137,25 @@ type dialScheduler struct {
@@ -367,7 +367,7 @@ index c9a6560ba..6782bc663 100644
  	go func() {
  		task.run(d)
 diff --git a/p2p/peer.go b/p2p/peer.go
-index 5521889f3..d93c9ce45 100644
+index 5521889..d93c9ce 100644
 --- a/p2p/peer.go
 +++ b/p2p/peer.go
 @@ -176,6 +176,14 @@ func (p *Peer) Caps() []Cap {
@@ -386,7 +386,7 @@ index 5521889f3..d93c9ce45 100644
  // enumerated versions of a specific protocol, meaning that at least one of the
  // versions is supported by both this node and the peer p.
 diff --git a/p2p/server.go b/p2p/server.go
-index e12ca5b3c..5c29a5b08 100644
+index e12ca5b..5c29a5b 100644
 --- a/p2p/server.go
 +++ b/p2p/server.go
 @@ -141,6 +141,8 @@ type conn struct {
