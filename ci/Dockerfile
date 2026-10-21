@@ -1,6 +1,6 @@
 # Builds spageth: clones upstream go-ethereum, applies the spageth patch +
 # overlay, wires the xatu module, and produces a geth binary.
-FROM golang:1.26.9-bookworm AS builder
+FROM golang:1.26.10-bookworm AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && \
     rm -rf /var/lib/apt/lists/*
