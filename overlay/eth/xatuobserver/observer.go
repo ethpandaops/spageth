@@ -16,7 +16,6 @@ import (
 	"github.com/creasty/defaults"
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
-	"gopkg.in/yaml.v3"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
@@ -235,7 +234,7 @@ func loadConfig(path string) (*Config, error) {
 	}
 
 	cfg := DefaultConfig()
-	if err := yaml.Unmarshal(data, cfg); err != nil {
+	if err := decodeConfig(data, cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse xatu observer config: %w", err)
 	}
 
