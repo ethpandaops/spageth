@@ -1,8 +1,8 @@
 diff --git a/cmd/geth/main.go b/cmd/geth/main.go
-index a9a21a2..924b565 100644
+index 2ff731a..81de83f 100644
 --- a/cmd/geth/main.go
 +++ b/cmd/geth/main.go
-@@ -129,6 +129,11 @@ var (
+@@ -130,6 +130,11 @@ var (
  		utils.DeveloperGasLimitFlag,
  		utils.DeveloperPeriodFlag,
  		utils.VMEnableDebugFlag,
@@ -15,10 +15,10 @@ index a9a21a2..924b565 100644
  		utils.VMTraceJsonConfigFlag,
  		utils.VMWitnessStatsFlag,
 diff --git a/cmd/utils/flags.go b/cmd/utils/flags.go
-index 8c0f72d..3643ac1 100644
+index c46ddf8..721765a 100644
 --- a/cmd/utils/flags.go
 +++ b/cmd/utils/flags.go
-@@ -628,6 +628,31 @@ var (
+@@ -625,6 +625,31 @@ var (
  		Usage:    "Record information useful for VM and contract debugging",
  		Category: flags.VMCategory,
  	}
@@ -50,9 +50,9 @@ index 8c0f72d..3643ac1 100644
  	VMTraceFlag = &cli.StringFlag{
  		Name:     "vmtrace",
  		Usage:    "Name of tracer which should record internal VM operations (costly)",
-@@ -1510,6 +1535,9 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config) {
- 	if ctx.IsSet(MaxPendingPeersFlag.Name) {
- 		cfg.MaxPendingPeers = ctx.Int(MaxPendingPeersFlag.Name)
+@@ -1525,6 +1550,9 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config) {
+ 	if ctx.IsSet(QUICMaxBrowsersFlag.Name) {
+ 		cfg.MaxBrowserPeers = ctx.Int(QUICMaxBrowsersFlag.Name)
  	}
 +	if ctx.IsSet(ChurnDialHistoryFlag.Name) {
 +		cfg.DialHistoryExpiration = ctx.Duration(ChurnDialHistoryFlag.Name)
@@ -60,9 +60,9 @@ index 8c0f72d..3643ac1 100644
  	if ctx.IsSet(NoDiscoverFlag.Name) {
  		cfg.NoDiscovery = ctx.Bool(NoDiscoverFlag.Name)
  	}
-@@ -2133,6 +2161,19 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
- 		}
- 	}()
+@@ -2140,6 +2168,19 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
+ 		Fatalf("Failed to set KZG library implementation to %s: %v", ctx.String(CryptoKZGFlag.Name), err)
+ 	}
  
 +	if ctx.IsSet(XatuConfigFlag.Name) {
 +		cfg.XatuConfig = ctx.String(XatuConfigFlag.Name)
@@ -81,10 +81,10 @@ index 8c0f72d..3643ac1 100644
  	if ctx.IsSet(VMTraceFlag.Name) {
  		if name := ctx.String(VMTraceFlag.Name); name != "" {
 diff --git a/eth/backend.go b/eth/backend.go
-index 25c541e..d0ea2e6 100644
+index a38ecdf..710c9dc 100644
 --- a/eth/backend.go
 +++ b/eth/backend.go
-@@ -366,7 +366,12 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
+@@ -363,7 +363,12 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
  		return nil, err
  	}
  
@@ -166,12 +166,12 @@ index 36c970e..9ffbe4c 100644
  			return
  		}
 diff --git a/eth/ethconfig/config.go b/eth/ethconfig/config.go
-index ab3143b..7c3e1a3 100644
+index 27ea418..a24fc10 100644
 --- a/eth/ethconfig/config.go
 +++ b/eth/ethconfig/config.go
-@@ -188,6 +188,21 @@ type Config struct {
- 	// It is not safe to enable on public networks yet.
- 	SnapV2 bool
+@@ -182,6 +182,21 @@ type Config struct {
+ 	// snap/1. snap/2 is served either way, except while syncing via snap/1.
+ 	SnapV2 *bool `toml:",omitempty"`
  
 +	// XatuConfig is the path to a xatu observer configuration file. When set,
 +	// every eth handshake (inbound and outbound, successful or rejected) is
@@ -192,10 +192,10 @@ index ab3143b..7c3e1a3 100644
  	VMTrace           string
  	VMTraceJsonConfig string
 diff --git a/eth/handler.go b/eth/handler.go
-index ed01490..2028676 100644
+index d43f1b9..898fd45 100644
 --- a/eth/handler.go
 +++ b/eth/handler.go
-@@ -151,6 +151,14 @@ type handler struct {
+@@ -183,6 +183,14 @@ type handler struct {
  
  	requiredBlocks map[uint64]common.Hash
  
@@ -210,7 +210,7 @@ index ed01490..2028676 100644
  	// channels for fetcher, syncer, txsyncLoop
  	quitSync chan struct{}
  
-@@ -293,8 +301,14 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
+@@ -329,8 +337,14 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
  	// Execute the Ethereum handshake
  	if err := peer.Handshake(h.networkID, h.chain, h.blockRange.currentRange()); err != nil {
  		peer.Log().Debug("Ethereum handshake failed", "err", err)
@@ -226,10 +226,10 @@ index ed01490..2028676 100644
  	if h.downloader.ConfigSyncMode() == ethconfig.SnapSync {
  		// A peer is useful to the active state syncer only if it offers the snap
 diff --git a/eth/handler_eth.go b/eth/handler_eth.go
-index 603c91f..0e26e28 100644
+index 0197773..a054405 100644
 --- a/eth/handler_eth.go
 +++ b/eth/handler_eth.go
-@@ -81,6 +81,9 @@ func (h *ethHandler) Handle(peer *eth.Peer, packet eth.Packet) error {
+@@ -80,6 +80,9 @@ func (h *ethHandler) Handle(peer *eth.Peer, packet eth.Packet) error {
  		if err != nil {
  			return fmt.Errorf("Transactions: %v", err)
  		}
@@ -239,7 +239,7 @@ index 603c91f..0e26e28 100644
  		if err := handleTransactions(peer, txs, true); err != nil {
  			return fmt.Errorf("Transactions: %v", err)
  		}
-@@ -91,6 +94,9 @@ func (h *ethHandler) Handle(peer *eth.Peer, packet eth.Packet) error {
+@@ -90,6 +93,9 @@ func (h *ethHandler) Handle(peer *eth.Peer, packet eth.Packet) error {
  		if err != nil {
  			return fmt.Errorf("PooledTransactions: %v", err)
  		}
@@ -263,10 +263,10 @@ index 359e4e3..77bb5f4 100644
  		return fmt.Errorf("%w: %d (!= %d)", errNetworkIDMismatch, status.NetworkID, networkID)
  	}
 diff --git a/eth/protocols/eth/peer.go b/eth/protocols/eth/peer.go
-index f377734..4579426 100644
+index 652d5bd..31e74bf 100644
 --- a/eth/protocols/eth/peer.go
 +++ b/eth/protocols/eth/peer.go
-@@ -67,6 +67,11 @@ type Peer struct {
+@@ -69,6 +69,11 @@ type Peer struct {
  	version   uint              // Protocol version negotiated
  	lastRange atomic.Pointer[BlockRangeUpdatePacket]
  
@@ -278,7 +278,7 @@ index f377734..4579426 100644
  	txpool      TxPool // Transaction pool used by the broadcasters for liveness checks
  	blobpool    BlobPool
  	knownTxs    *knownCache        // Set of transaction hashes known to be known by this peer
-@@ -136,6 +141,14 @@ func (p *Peer) Version() uint {
+@@ -138,6 +143,14 @@ func (p *Peer) Version() uint {
  	return p.version
  }
  
@@ -294,7 +294,7 @@ index f377734..4579426 100644
  // This will be nil for peers below protocol version eth/69.
  func (p *Peer) BlockRange() *BlockRangeUpdatePacket {
 diff --git a/p2p/config.go b/p2p/config.go
-index 17607a1..46dad83 100644
+index ee48e0b..27bb981 100644
 --- a/p2p/config.go
 +++ b/p2p/config.go
 @@ -20,6 +20,7 @@ import (
@@ -367,10 +367,10 @@ index c9a6560..6782bc6 100644
  	go func() {
  		task.run(d)
 diff --git a/p2p/peer.go b/p2p/peer.go
-index 5521889..d93c9ce 100644
+index d2c18c9..e7add3e 100644
 --- a/p2p/peer.go
 +++ b/p2p/peer.go
-@@ -176,6 +176,14 @@ func (p *Peer) Caps() []Cap {
+@@ -164,6 +164,14 @@ func (p *Peer) Caps() []Cap {
  	return p.rw.caps
  }
  
@@ -386,10 +386,10 @@ index 5521889..d93c9ce 100644
  // enumerated versions of a specific protocol, meaning that at least one of the
  // versions is supported by both this node and the peer p.
 diff --git a/p2p/server.go b/p2p/server.go
-index e12ca5b..5c29a5b 100644
+index 3bdb502..b591ddf 100644
 --- a/p2p/server.go
 +++ b/p2p/server.go
-@@ -141,6 +141,8 @@ type conn struct {
+@@ -147,13 +147,16 @@ type conn struct {
  	cont  chan error // The run loop uses cont to signal errors to SetupConn.
  	caps  []Cap      // valid after the protocol handshake
  	name  string     // valid after the protocol handshake
@@ -397,8 +397,19 @@ index e12ca5b..5c29a5b 100644
 +	listenPort uint64 // TCP listening port advertised in the Hello message, if any
  }
  
+ // transportHello is the information returned by devp2p handshake.
+ type transportHello struct {
+-	NodeID enode.ID
+-	Name   string
+-	Caps   []Cap
++	NodeID     enode.ID
++	Name       string
++	Caps       []Cap
++	ListenPort uint64
+ }
+ 
  type transport interface {
-@@ -506,6 +508,8 @@ func (srv *Server) setupDialScheduler() {
+@@ -523,6 +526,8 @@ func (srv *Server) setupDialScheduler() {
  		netRestrict:    srv.NetRestrict,
  		dialer:         srv.Dialer,
  		clock:          srv.clock,
@@ -407,11 +418,24 @@ index e12ca5b..5c29a5b 100644
  	}
  	if srv.discv4 != nil {
  		config.resolver = srv.discv4
-@@ -918,6 +922,7 @@ func (srv *Server) setupConn(c *conn, dialDest *enode.Node) error {
+@@ -1063,6 +1068,7 @@ func (srv *Server) setupConn(c *conn, dialDest *enode.Node) error {
  		return DiscUnexpectedIdentity
  	}
- 	c.caps, c.name = phs.Caps, phs.Name
-+	c.listenPort = phs.ListenPort
+ 	c.caps, c.name = theirHello.Caps, theirHello.Name
++	c.listenPort = theirHello.ListenPort
  	err = srv.checkpoint(c, srv.checkpointAddPeer)
  	if err != nil {
  		clog.Trace("Rejected peer", "err", err)
+diff --git a/p2p/transport.go b/p2p/transport.go
+index 1d4541f..880a146 100644
+--- a/p2p/transport.go
++++ b/p2p/transport.go
+@@ -169,7 +169,7 @@ func (t *rlpxTransport) doProtoHandshake(our *devp2pProtocolHandshake) (transpor
+ 	// If the protocol version supports Snappy encoding, upgrade immediately
+ 	t.conn.SetSnappy(their.Version >= snappyProtocolVersion)
+ 
+-	hello := transportHello{NodeID: hashKeyV4(their.ID), Caps: their.Caps, Name: their.Name}
++	hello := transportHello{NodeID: hashKeyV4(their.ID), Caps: their.Caps, Name: their.Name, ListenPort: their.ListenPort}
+ 	return hello, nil
+ }
+ 
