@@ -139,6 +139,30 @@ See [`example.config.yaml`](example.config.yaml) for the node-records observer
 config. `--vmtrace statesize` needs no config. With neither flag set, spageth
 behaves exactly like stock geth.
 
+### Environment variables in the observer config
+
+The `--xatu.config` file can reference environment variables in any value, so the
+output credentials can come from the environment instead of the file:
+
+```yaml
+output:
+  address: ${XATU_ADDRESS:-localhost:8080}
+  headers:
+    Authorization: "Basic ${XATU_AUTH}"
+```
+
+- `${VAR}` is replaced with the value of `VAR`. If `VAR` is unset or empty,
+  spageth refuses to start and names the variable.
+- `${VAR:-default}` uses `default` when `VAR` is unset or empty. `${VAR:-}`
+  makes the variable optional.
+- Only the `${...}` form is expanded: `$VAR` and any other `$` are kept as
+  written.
+- Placeholders are expanded in values only, after the YAML is parsed. Keys and
+  comments are never expanded, and a value containing quotes, `#`, tabs or
+  newlines arrives exactly as set.
+- An unquoted placeholder takes the type of its value, so `port: ${PORT}` can
+  fill a number. A quoted placeholder is always a string.
+
 ### Configurable everything
 
 All of the harvesting behaviour is exposed as flags — nothing is hardcoded:

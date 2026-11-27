@@ -56,6 +56,49 @@ output:
 	}
 }
 
+func TestLoadConfigExpandsEnv(t *testing.T) {
+	t.Setenv("SPAGETH_TEST_AUTH", awkwardValue)
+	t.Setenv("SPAGETH_TEST_CACHE_SIZE", "5")
+
+	config := `
+mempool:
+  cacheSize: ${SPAGETH_TEST_CACHE_SIZE}
+output:
+  address: ${SPAGETH_TEST_ADDRESS:-xatu-grpc.example:443}
+  headers:
+    Authorization: "${SPAGETH_TEST_AUTH}"
+`
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := loadConfig(path)
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+
+	if cfg.Output.Address != "xatu-grpc.example:443" {
+		t.Errorf("address = %q", cfg.Output.Address)
+	}
+
+	if got := cfg.Output.Headers["Authorization"]; got != awkwardValue {
+		t.Errorf("Authorization = %q, want %q", got, awkwardValue)
+	}
+
+	if cfg.Mempool.CacheSize != 5 {
+		t.Errorf("CacheSize = %d, want 5", cfg.Mempool.CacheSize)
+	}
+
+	if err := os.WriteFile(path, []byte("output:\n  address: ${SPAGETH_TEST_UNSET}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := loadConfig(path); !errors.Is(err, errUnsetEnvVar) {
+		t.Fatalf("loadConfig with unset variable: got %v, want %v", err, errUnsetEnvVar)
+	}
+}
+
 func testObserver(t *testing.T) *Observer {
 	t.Helper()
 
